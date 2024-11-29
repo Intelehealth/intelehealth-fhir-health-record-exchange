@@ -1,2 +1,2 @@
-# intelehealth-path-health-record-exchange
-Repository for Path Health Record Exchange
+# intelehealth-fhir-health-record-exchange
+Repository for FHIR Health Record Exchange
