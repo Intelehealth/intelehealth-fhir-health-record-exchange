@@ -18,20 +18,27 @@ mvn spring-boot:run
 
 ## Steps to start in Docker
 
-step-1: edit src/main/resources/application.properties
+step-1: Clone the code
+
+        git clone https://github.com/Intelehealth/intelehealth-fhir-health-record-exchange.git
+
+step-2: Enter to root folder
+
+        cd intelehealth-fhir-health-record-exchange
+        
+step-3: Edit src/main/resources/application.properties
 
         replace the relevant urls
 
-step-2: 
+step-4: Build the image
 
         docker compose build
 
-step-3: 
+step-5: Run the application
 
         docker compose up -d
 
 
-
-## browse
+## Browse
 
         http://host-ip:5002
