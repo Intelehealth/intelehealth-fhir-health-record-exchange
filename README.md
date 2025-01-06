@@ -16,3 +16,22 @@ Alternatively you can use the [Spring Boot Maven plugin](https://docs.spring.io/
 mvn spring-boot:run
 ```
 
+## Steps
+
+step-1: edit src/main/resources/application.properties
+
+        replace the relevant urls
+
+step-2: 
+
+        docker compose build
+
+step-3: 
+
+        docker compose up -d
+
+
+
+## browse
+
+        http://host-ip:5002

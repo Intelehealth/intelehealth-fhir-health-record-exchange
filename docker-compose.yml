@@ -1,0 +1,8 @@
+services:
+   health-record:
+      build: .
+      image: health.record:1.0
+      container_name: health-record
+      ports:
+         - "5002:5002"
+      command: /bin/bash -c "java -jar /app/target/health.record.exchange-0.0.1-SNAPSHOT.jar"
