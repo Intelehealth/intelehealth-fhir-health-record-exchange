@@ -16,7 +16,7 @@ Alternatively you can use the [Spring Boot Maven plugin](https://docs.spring.io/
 mvn spring-boot:run
 ```
 
-## Steps
+## Steps to start in Docker
 
 step-1: edit src/main/resources/application.properties
 
