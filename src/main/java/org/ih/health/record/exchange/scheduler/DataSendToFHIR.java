@@ -2,13 +2,23 @@ package org.ih.health.record.exchange.scheduler;
 
 import java.io.UnsupportedEncodingException;
 import java.text.ParseException;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
+import org.hl7.fhir.common.hapi.validation.support.InMemoryTerminologyServerValidationSupport;
+import org.hl7.fhir.common.hapi.validation.support.PrePopulatedValidationSupport;
+import org.hl7.fhir.common.hapi.validation.support.ValidationSupportChain;
+import org.hl7.fhir.common.hapi.validation.validator.FhirInstanceValidator;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.Bundle.BundleEntryComponent;
+import org.hl7.fhir.r4.model.Encounter;
+import org.hl7.fhir.r4.model.MedicationRequest;
+import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.Resource;
-import org.ih.health.record.exchange.ConfigFacilityDataType;
+import org.hl7.fhir.r4.model.ServiceRequest;
 import org.ih.health.record.exchange.config.FhirConfig;
+import org.ih.health.record.exchange.datatype.ConfigFacilityDataType;
 import org.ih.health.record.exchange.datatype.EncounterType;
 import org.ih.health.record.exchange.datatype.OrderType;
 import org.ih.health.record.exchange.domain.CompeletdVisit;
@@ -29,7 +39,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import ca.uhn.fhir.context.FhirContext;
+import ca.uhn.fhir.context.support.DefaultProfileValidationSupport;
 import ca.uhn.fhir.parser.DataFormatException;
+import ca.uhn.fhir.validation.FhirValidator;
+import ca.uhn.fhir.validation.ValidationResult;
 
 @Component
 public class DataSendToFHIR extends IHConstant {
@@ -57,24 +70,24 @@ public class DataSendToFHIR extends IHConstant {
 
 		ConfigDataSync healthRecordSync = configDataSyncService.getConfigDataSync(ConfigFacilityDataType.HEALTH_RECORD);
 
-		if (healthRecordSync.isActive()) {
+		if (healthRecordSync.getStatus()) {
 
 			// Transferring all the medication list to central @Fhir server
 			transferMedication();
 
 			// Transferring all the visit completed encounter where patient is already
 			// transfered to central @FHIR server
-			transferEncounter();
+			HashSet<Integer> encounterIds = transferEncounter();
 
-			transferObservation();
+			transferObservation(encounterIds);
 
 			// Transferring all lab order which is related to encounter to
 			// central @Fhir server
-			transferServiceRequest();
+			transferServiceRequest(encounterIds);
 
 			// Transferring all drug order which is related to encounter to
 			// central @Fhir server
-			transferMedicationRequest();
+			transferMedicationRequest(encounterIds);
 
 			System.err.println("(HRE) Transfer completed ............");
 		} else {
@@ -109,64 +122,72 @@ public class DataSendToFHIR extends IHConstant {
 		}
 	}
 
-	private void transferServiceRequest() throws UnsupportedEncodingException, DataFormatException, ParseException {
+	private void transferServiceRequest(HashSet<Integer> encounterIds)
+			throws UnsupportedEncodingException, DataFormatException, ParseException {
 
-		IHMarker marker = ihMarkerService.findByName(exportServiceRequest);
+		List<ArrayList<Integer>> partitions = getPartitions(encounterIds, 25);
 
-		List<CompletedRecord> serviceRequestList = commonOperationService
-				.getCompletedServiceRequest(OrderType.LAB_ORDER.getValue(), marker.getLastSyncTime());
-
-		System.err.println("Total service request to send: " + serviceRequestList.size());
-
+		int totalServiceRequestFound = 0;
 		int serviceRequestSendingError = 0;
 
-		for (CompletedRecord theMedicationRequest : serviceRequestList) {
-			try {
-				send("ServiceRequest", theMedicationRequest.getUuid());
-			} catch (Exception e) {
-				System.err.println(e);
-				serviceRequestSendingError++;
+		for (ArrayList<Integer> subset : partitions) {
+			List<CompletedRecord> serviceRequestList = commonOperationService.getCompletedServiceRequest(subset,
+					OrderType.LAB_ORDER.getValue());
+
+			totalServiceRequestFound += serviceRequestList.size();
+
+			System.err.println("Total service request to send: " + serviceRequestList.size());
+
+			for (CompletedRecord theMedicationRequest : serviceRequestList) {
+				try {
+					send("ServiceRequest", theMedicationRequest.getUuid());
+				} catch (Exception e) {
+					System.err.println(e);
+					serviceRequestSendingError++;
+				}
 			}
 		}
 
-		System.err.format("Total ServiceRequest found: %d, Successfully Send %d, Error %d\n", serviceRequestList.size(),
-				serviceRequestList.size() - serviceRequestSendingError, serviceRequestSendingError);
+		System.err.format("Total ServiceRequest found: %d, Successfully Send %d, Error %d\n", totalServiceRequestFound,
+				totalServiceRequestFound - serviceRequestSendingError, serviceRequestSendingError);
 
-		if (serviceRequestList.size() > 0) {
-			ihMarkerService.updateMarkerByName(exportServiceRequest);
-		}
 	}
 
-	private void transferMedicationRequest() throws UnsupportedEncodingException, DataFormatException, ParseException {
+	private void transferMedicationRequest(HashSet<Integer> encounterIds)
+			throws UnsupportedEncodingException, DataFormatException, ParseException {
 
-		IHMarker marker = ihMarkerService.findByName(exportMedicationRequest);
+		List<ArrayList<Integer>> partitions = getPartitions(encounterIds, 25);
 
-		List<CompletedRecord> medicationRequestList = commonOperationService
-				.getCompletedServiceRequest(OrderType.DRUG_ORDER.getValue(), marker.getLastSyncTime());
-
-		System.err.println("Total medication request to send: " + medicationRequestList.size());
-
+		int totalMedicationRequestFound = 0;
 		int medicationRequestSendingError = 0;
 
-		for (CompletedRecord theMedicationRequest : medicationRequestList) {
-			try {
-				send("MedicationRequest", theMedicationRequest.getUuid());
-			} catch (Exception e) {
-				System.err.println(e);
-				medicationRequestSendingError++;
+		for (ArrayList<Integer> subset : partitions) {
+
+			List<CompletedRecord> medicationRequestList = commonOperationService.getCompletedServiceRequest(subset,
+					OrderType.DRUG_ORDER.getValue());
+
+			totalMedicationRequestFound += medicationRequestList.size();
+
+			System.err.println("Total medication request to send: " + medicationRequestList.size());
+
+			for (CompletedRecord theMedicationRequest : medicationRequestList) {
+				try {
+					send("MedicationRequest", theMedicationRequest.getUuid());
+				} catch (Exception e) {
+					System.err.println(e);
+					medicationRequestSendingError++;
+				}
 			}
 		}
 
 		System.err.format("Total MedicationRequest found: %d, Successfully Send %d, Error %d\n",
-				medicationRequestList.size(), medicationRequestList.size() - medicationRequestSendingError,
+				totalMedicationRequestFound, totalMedicationRequestFound - medicationRequestSendingError,
 				medicationRequestSendingError);
 
-		if (medicationRequestList.size() > 0) {
-			ihMarkerService.updateMarkerByName(exportMedicationRequest);
-		}
 	}
 
-	private void transferEncounter() throws UnsupportedEncodingException, DataFormatException, ParseException {
+	private HashSet<Integer> transferEncounter()
+			throws UnsupportedEncodingException, DataFormatException, ParseException {
 		IHMarker marker = ihMarkerService.findByName(exportEncounter);
 
 		List<CompeletdVisit> visits = commonOperationService.getCompletedVisit(marker.getLastSyncTime(),
@@ -176,6 +197,7 @@ public class DataSendToFHIR extends IHConstant {
 
 		int encounterSendingError = 0;
 		int totalEncounter = 0;
+		HashSet<Integer> encounterIds = new HashSet<>();
 
 		for (CompeletdVisit theVisit : visits) {
 
@@ -192,6 +214,7 @@ public class DataSendToFHIR extends IHConstant {
 			for (CompletedRecord theEncounter : encounters) {
 				try {
 					send("Encounter", theEncounter.getUuid());
+					encounterIds.add(theEncounter.getId());
 					totalEncounter++;
 				} catch (Exception e) {
 					System.err.println(e);
@@ -206,32 +229,44 @@ public class DataSendToFHIR extends IHConstant {
 		if (visits.size() > 0) {
 			ihMarkerService.updateMarkerByName(exportEncounter);
 		}
+		return encounterIds;
 	}
 
-	private void transferObservation() {
-		IHMarker observationMarker = ihMarkerService.findByName(exportObservation);
+	private void transferObservation(HashSet<Integer> encounterIds) {
 
-		List<CompletedRecord> obs = commonOperationService.getCompletedObs(observationMarker.getLastSyncTime());
+		List<ArrayList<Integer>> partitions = getPartitions(encounterIds, 25);
 
+		int totalObservationFound = 0;
 		int observationSendingError = 0;
 
-		// TODO need to check that encounter already exist in central fhir server,
-		// currently not implemented
-		for (CompletedRecord theObs : obs) {
-			try {
-				send("Observation", theObs.getUuid());
-			} catch (Exception e) {
-				System.err.println(e);
-				observationSendingError++;
+		for (ArrayList<Integer> subset : partitions) {
+			List<CompletedRecord> obs = commonOperationService.getCompletedObs(subset);
+			totalObservationFound += obs.size();
+			for (CompletedRecord theObs : obs) {
+				try {
+					send("Observation", theObs.getUuid());
+				} catch (Exception e) {
+					System.err.println(e);
+					observationSendingError++;
+				}
 			}
 		}
 
-		System.err.format("Total Observation found: %d, Successfully Send %d, Error %d\n", obs.size(),
-				obs.size() - observationSendingError, observationSendingError);
+		System.err.format("Total Observations found: %d, Successfully Sent: %d, Errors: %d\n", totalObservationFound,
+				totalObservationFound - observationSendingError, observationSendingError);
+	}
 
-		if (obs.size() > 0) {
-			ihMarkerService.updateMarkerByName(exportObservation);
+	private List<ArrayList<Integer>> getPartitions(HashSet<Integer> encounterIds, int partitionSize) {
+		List<Integer> encounterList = new ArrayList<>(encounterIds); // Convert to list for indexing
+
+		// Partition encounterIds into subsets of 25
+		List<ArrayList<Integer>> partitions = new ArrayList<>();
+
+		for (int i = 0; i < encounterList.size(); i += partitionSize) {
+			partitions
+					.add(new ArrayList<>(encounterList.subList(i, Math.min(i + partitionSize, encounterList.size()))));
 		}
+		return partitions;
 	}
 
 	private void send(String resource, String uuid)
@@ -260,9 +295,56 @@ public class DataSendToFHIR extends IHConstant {
 				Resource resource = (Resource) bundleEntry.getResource();
 				System.err.println("resource.getMeta().getLastUpdated():::" + resource.getMeta().getLastUpdated());
 				String resourceId = resource.getIdElement().getIdPart();
-
 				Bundle.BundleEntryComponent component = transactionBundle.addEntry();
-				component.setResource(resource);
+
+				if (resourceType.equalsIgnoreCase("Encounter")) {
+					Encounter encounter = (Encounter) bundleEntry.getResource();
+
+					String patientRef = encounter.getSubject().getReference().split("/")[1];
+					System.out.println("Patient Ref >>>>>>>>>>> : " + patientRef);
+					String mpiId = commonOperationService.getMPIUsingPatientReference(patientRef);
+					if (mpiId != null)
+						encounter.getSubject().setReference("Patient/" + mpiId);
+					System.out.println("Patient MPI >>>>>>>>>>> : " + mpiId);
+					validateResource(encounter);
+					component.setResource(encounter);
+
+				} else if (resourceType.equalsIgnoreCase("Observation")) {
+					Observation observation = (Observation) bundleEntry.getResource();
+					String patientRef = observation.getSubject().getReference().split("/")[1];
+					System.out.println("Patient Ref >>>>>>>>>>> : " + patientRef);
+					String mpiId = commonOperationService.getMPIUsingPatientReference(patientRef);
+					if (mpiId != null)
+						observation.getSubject().setReference("Patient/" + mpiId);
+					System.out.println("Patient MPI >>>>>>>>>>> : " + mpiId);
+					validateResource(observation);
+					component.setResource(observation);
+
+				} else if (resourceType.equalsIgnoreCase("MedicationRequest")) {
+					MedicationRequest medicationRequest = (MedicationRequest) bundleEntry.getResource();
+					String patientRef = medicationRequest.getSubject().getReference().split("/")[1];
+					System.out.println("Patient Ref >>>>>>>>>>> : " + patientRef);
+					String mpiId = commonOperationService.getMPIUsingPatientReference(patientRef);
+					if (mpiId != null)
+						medicationRequest.getSubject().setReference("Patient/" + mpiId);
+					System.out.println("Patient MPI >>>>>>>>>>> : " + mpiId);
+					validateResource(medicationRequest);
+					component.setResource(medicationRequest);
+
+				} else if (resourceType.equalsIgnoreCase("ServiceRequest")) {
+					ServiceRequest serviceRequest = (ServiceRequest) bundleEntry.getResource();
+					String patientRef = serviceRequest.getSubject().getReference().split("/")[1];
+					System.out.println("Patient Ref >>>>>>>>>>> : " + patientRef);
+					String mpiId = commonOperationService.getMPIUsingPatientReference(patientRef);
+					if (mpiId != null)
+						serviceRequest.getSubject().setReference("Patient/" + mpiId);
+					System.out.println("Patient MPI >>>>>>>>>>> : " + mpiId);
+					validateResource(serviceRequest);
+					component.setResource(serviceRequest);
+				} else {
+					component.setResource(resource);
+				}
+
 				component.getRequest().setUrl(resource.fhirType() + "/" + resourceId).setMethod(Bundle.HTTPVerb.PUT);
 
 				String payload = fhirContext.newJsonParser().setPrettyPrint(true)
@@ -304,6 +386,34 @@ public class DataSendToFHIR extends IHConstant {
 			return null;
 		Resource resource = bundle.getEntryFirstRep().getResource();
 		return resource.getIdElement().getIdPart();
+	}
+	
+	private void validateResource(Resource resource) {
+		
+        FhirValidator validator = fhirContext.newValidator();
+        
+        FhirInstanceValidator instanceValidator = new FhirInstanceValidator(fhirContext);
+        
+        ValidationSupportChain supportChain = new ValidationSupportChain(
+                new DefaultProfileValidationSupport(fhirContext),
+                new PrePopulatedValidationSupport(fhirContext),
+                new InMemoryTerminologyServerValidationSupport(fhirContext)
+        );
+        
+        instanceValidator.setValidationSupport(supportChain);
+        
+        validator.registerValidatorModule(instanceValidator);
+
+        ValidationResult result = validator.validateWithResult(resource);
+        
+        if (result.isSuccessful()) {
+            System.out.println("Validation passed!");
+        } else {
+            System.err.println("Validation failed:");
+            result.getMessages().forEach(msg -> {
+                System.err.println(" - " + msg.getSeverity() + ": " + msg.getMessage());
+            });
+        }
 	}
 
 }

@@ -30,10 +30,6 @@ public class ConfigDataSync {
 		this.status = status;
 	}
 
-	public boolean isActive() {
-		return this.status;
-	}
-
 	@Override
 	public String toString() {
 		return "ConfigDataSync [id=" + id + ", name=" + name + ", status=" + status + "]";

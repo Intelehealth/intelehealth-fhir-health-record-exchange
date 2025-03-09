@@ -7,7 +7,7 @@ import javax.persistence.PersistenceContext;
 import javax.persistence.Query;
 import javax.persistence.Tuple;
 
-import org.ih.health.record.exchange.ConfigFacilityDataType;
+import org.ih.health.record.exchange.datatype.ConfigFacilityDataType;
 import org.ih.health.record.exchange.domain.ConfigDataSync;
 import org.springframework.stereotype.Service;
 

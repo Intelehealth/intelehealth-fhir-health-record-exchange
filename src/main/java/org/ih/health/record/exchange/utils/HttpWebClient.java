@@ -44,8 +44,8 @@ public class HttpWebClient {
 	}
 
 	public static FhirResponse postWithBasicAuth(String baseURL, String APIURL, String username, String password,
-			String paylaod) {
-		System.err.println(baseURL + "" + APIURL + "-" + username + "-" + password + "-" + paylaod);
+			String payload) {
+		System.err.println(baseURL + "" + APIURL + "-" + username + "-" + password + "-" + payload);
 		WebClient webClient = WebClient.builder().baseUrl(baseURL)
 				.defaultHeaders(httpHeaders -> httpHeaders.setBasicAuth(username, password))
 				.exchangeStrategies(exchangeStrategies).build();
@@ -53,24 +53,32 @@ public class HttpWebClient {
 		FhirResponse response = new FhirResponse();
 
 		try {
-			String result = webClient.post().uri(APIURL)
-					.header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-					.body(Mono.just(paylaod), String.class).retrieve().bodyToMono(String.class).block();
-
-			response.setResponse(result);
-			response.setStatusCode("200");
-			response.setMessage(null);
-
+			
+			webClient.post().uri(APIURL).header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+					.body(Mono.just(payload), String.class).retrieve().toEntity(String.class) // Captures both the body
+																								// and status code
+					.map(entity -> {
+						// Populate FhirResponse on success
+						response.setResponse(entity.getBody());
+						response.setStatusCode(String.valueOf(entity.getStatusCodeValue()));
+						response.setMessage(null);
+						return response;
+					}).block();
+			
 		} catch (WebClientResponseException e) {
-
 			System.err.println(e);
 			System.err.println(e.getStatusCode());
 			System.err.println(e.getResponseBodyAsString());
-
 			response.setMessage(e.getMessage());
 			response.setStatusCode(e.getStatusCode().toString());
 			response.setResponse(e.getResponseBodyAsString());
 
+		} catch (Exception e) {
+			// Handle other unexpected errors
+			System.err.println("Unexpected error: " + e.getMessage());
+			response.setMessage(e.getMessage());
+			response.setStatusCode("500"); // Internal Server Error
+			response.setResponse(null);
 		}
 		return response;
 

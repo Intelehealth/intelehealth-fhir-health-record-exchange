@@ -1,1 +1,0 @@
-package org.ih.health.record.exchange.domain;
