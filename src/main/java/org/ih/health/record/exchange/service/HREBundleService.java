@@ -5,12 +5,16 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
+import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.Bundle.BundleEntryComponent;
 import org.hl7.fhir.r4.model.CodeableConcept;
 import org.hl7.fhir.r4.model.Coding;
+import org.hl7.fhir.r4.model.Dosage;
 import org.hl7.fhir.r4.model.MedicationRequest;
 import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.Resource;
@@ -21,6 +25,8 @@ import org.ih.health.record.exchange.domain.MedicationRequestDTO;
 import org.ih.health.record.exchange.domain.ObservationDTO;
 import org.ih.health.record.exchange.exp.InvalidParamException;
 import org.ih.health.record.exchange.utils.ReqParam;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -52,6 +58,7 @@ public class HREBundleService {
 		reqParam.remove("mpiId");
 
 		reqParam.put("patient.identifier", mpiId);
+		reqParam.put("_count", "200");
 
 		Bundle results = firFhirConfig.getOpenCRFhirContext().search()
 				.byUrl(resourceType + "?" + ReqParam.toQueryParam(reqParam)).returnBundle(Bundle.class).execute();
@@ -112,67 +119,108 @@ public class HREBundleService {
 
 		ArrayList<ObservationDTO> observations = new ArrayList<>();
 
-		ArrayList<String> vitals = new ArrayList<>();
-		ArrayList<String> currentComplaints = new ArrayList<>();
-		ArrayList<String> physicalExam = new ArrayList<>();
-		ArrayList<String> familyHistory = new ArrayList<>();
-		ArrayList<String> medicalHistory = new ArrayList<>();
-		ArrayList<String> referral = new ArrayList<>();
+		HashMap<String, ArrayList> vitalMap = new HashMap<>();
+		HashMap<String, ArrayList> complainMap = new HashMap<>();
+		HashMap<String, ArrayList> physicalMap = new HashMap<>();
+		HashMap<String, ArrayList> familyHistoryMap = new HashMap<>();
+		HashMap<String, ArrayList> medicalHistoryMap = new HashMap<>();
+		HashMap<String, ArrayList> mentalFormMap = new HashMap<>();
+
+		ArrayList<Object> referral = new ArrayList<>();
 
 		while (iterator.hasNext()) {
 			BundleEntryComponent bundleEntry = iterator.next();
 			Observation obs = (Observation) bundleEntry.getResource();
 			HashMap<String, Object> obsItem = new HashMap<>();
+			try {
+				if (obs.getCode().getText().toUpperCase().contains("COMPLAINT")
+						|| hasSnomedCode(obs.getCode(), "422843007")) {
+					String encounter = obs.getEncounter().getReference();
+					ArrayList<String> listItem = complainMap.getOrDefault(encounter, new ArrayList<>());
+					listItem.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "CURRENT COMPLAINT"));
+					complainMap.put(encounter, listItem);
+				} else if (obs.getCode().getText().toUpperCase().contains("PHYSICAL EXAMINATION")
+						|| hasSnomedCode(obs.getCode(), "425044008")) {
+					String encounter = obs.getEncounter().getReference();
+					ArrayList<String> listItem = physicalMap.getOrDefault(encounter, new ArrayList<>());
+					listItem.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "PHYSICAL EXAMINATION"));
+					physicalMap.put(encounter, listItem);
+				} else if (obs.getCode().getText().toUpperCase().contains("FAMILY HISTORY")
+						|| hasSnomedCode(obs.getCode(), "422432008")) {
+					String encounter = obs.getEncounter().getReference();
+					ArrayList<String> listItem = familyHistoryMap.getOrDefault(encounter, new ArrayList<>());
+					listItem.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "FAMILY HISTORY"));
+					familyHistoryMap.put(encounter, listItem);
+				} else if (obs.getCode().getText().toUpperCase().contains("MEDICAL HISTORY")
+						|| hasSnomedCode(obs.getCode(), "371529009")) {
 
-			if (obs.getCode().getText().contains("CURRENT COMPLAINT") || hasSnomedCode(obs.getCode(), "422843007")) {
-				currentComplaints.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "CURRENT COMPLAINT"));
-			} else if (obs.getCode().getText().contains("PHYSICAL EXAMINATION") || hasSnomedCode(obs.getCode(), "425044008")) {
-				physicalExam.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "PHYSICAL EXAMINATION"));
-				parseHTML(obs.getValueStringType().getValueAsString(), "PHYSICAL EXAMINATION");
-			} else if (obs.getCode().getText().contains("FAMILY HISTORY") || hasSnomedCode(obs.getCode(), "422432008")) {
-				familyHistory.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "FAMILY HISTORY"));
-			} else if (obs.getCode().getText().contains("MEDICAL HISTORY") || hasSnomedCode(obs.getCode(), "371529009")) {
-				medicalHistory.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "MEDICAL HISTORY"));
-			} else if (obs.getCode().getText().contains("Referral")) {
-//				referral.addAll(parseHTML(obs.getValueStringType().getValueAsString(),"Referral"));
-			} else if (obs.getCategory() != null && !obs.getCategory().isEmpty()
-					&& obs.getCategory().get(0).getCoding().get(0).getCode().equals("exam")) {
-				if (obs.getValueQuantity() != null) {
-					vitals.add(obs.getCode().getText() + " : " + obs.getValueQuantity().getValue());
+					String encounter = obs.getEncounter().getReference();
+					ArrayList<String> listItem = medicalHistoryMap.getOrDefault(encounter, new ArrayList<>());
+					listItem.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "MEDICAL HISTORY"));
+					medicalHistoryMap.put(encounter, listItem);
+				} else if (obs.getCode().getText().contains("Referral")) {
+//					referral.addAll(parseHTML(obs.getValueStringType().getValueAsString(),"Referral"));
+				} else if (obs.getCategory() != null && !obs.getCategory().isEmpty()
+						&& obs.getCategory().get(0).getCoding().get(0).getCode().equals("exam")) {
+
+					String encounter = obs.getEncounter().getReference();
+					ArrayList<String> vitalSample = vitalMap.getOrDefault(encounter, new ArrayList<>());
+					if (obs.getValueQuantity() != null) {
+						String vital = obs.getCode().getText() + " : " + obs.getValueQuantity().getValue();
+						vitalSample.add(vital);
+						vitalMap.put(encounter, vitalSample);
+					}
+				} else {
+					String encounter = obs.getEncounter().getReference();
+					String question = obs.getCode().getText();
+					if (question.endsWith("?")) {
+						String answer = obs.getValueStringType().getValue();
+						System.err.println(question + " " + answer);
+						ArrayList<String> mentalFormSample = mentalFormMap.getOrDefault(encounter,
+								new ArrayList<String>());
+						mentalFormSample.add(question + " : " + answer);
+						mentalFormMap.put(encounter, mentalFormSample);
+					}
+
 				}
+			} catch (Exception e) {
+				e.printStackTrace();
 			}
 		}
 
 		ObservationDTO vitalObs = new ObservationDTO();
 		vitalObs.setTitle("Vitals");
-		vitals = parseVitals(vitals);
-		vitalObs.setData(vitals);
+		vitalObs.setData(vitalMap.values());
 		observations.add(vitalObs);
 
 		ObservationDTO currComplaintObs = new ObservationDTO();
 		currComplaintObs.setTitle("Current Complaint");
-		currComplaintObs.setData(currentComplaints);
+		currComplaintObs.setData(complainMap.values());
 		observations.add(currComplaintObs);
 
 		ObservationDTO physicalExamObs = new ObservationDTO();
 		physicalExamObs.setTitle("Physical Examination");
-		physicalExamObs.setData(physicalExam);
+		physicalExamObs.setData(physicalMap.values());
 		observations.add(physicalExamObs);
 
 		ObservationDTO familyObs = new ObservationDTO();
 		familyObs.setTitle("Family History");
-		familyObs.setData(familyHistory);
+		familyObs.setData(familyHistoryMap.values());
 		observations.add(familyObs);
 
 		ObservationDTO medicalHistoryObs = new ObservationDTO();
 		medicalHistoryObs.setTitle("Medical History");
-		medicalHistoryObs.setData(medicalHistory);
+		medicalHistoryObs.setData(medicalHistoryMap.values());
 		observations.add(medicalHistoryObs);
+
+		ObservationDTO mentalFormObs = new ObservationDTO();
+		mentalFormObs.setTitle("Patient Mental Health");
+		mentalFormObs.setData(mentalFormMap.values());
+		observations.add(mentalFormObs);
 
 		Gson gson = new Gson();
 		String response = gson.toJson(observations);
 		return response;
-
 	}
 
 	private ArrayList<String> parseVitals(ArrayList<String> vitals) {
@@ -252,19 +300,33 @@ public class HREBundleService {
 
 		while (iterator.hasNext()) {
 			BundleEntryComponent bundleEntry = iterator.next();
-			MedicationRequest medReq = (MedicationRequest) bundleEntry.getResource();
-			MedicationRequestDTO medReqDTO = new MedicationRequestDTO();
+			try {
+				MedicationRequest medReq = (MedicationRequest) bundleEntry.getResource();
+				MedicationRequestDTO medReqDTO = new MedicationRequestDTO();
 
-			String medicationName = medReq.getMedicationReference().getDisplay();
-			String dosage = medReq.getDosageInstructionFirstRep().getText();
-			BigDecimal days = medReq.getDosageInstructionFirstRep().getTiming().getRepeat().getDuration();
-			String doctorName = medReq.getRequester().getDisplay();
+				String medicationName = medReq.getMedicationReference().getDisplay();
+				String dosage = medReq.getDosageInstructionFirstRep().getText();
+				if (dosage == null) {
+					String json = fhirContext.newJsonParser().setPrettyPrint(true).encodeResourceToString(medReq);
+					JSONObject jo = new JSONObject(json);
+					JSONArray doIns = jo.getJSONArray("dosageInstruction");
+					JSONObject timing = doIns.getJSONObject(0).getJSONObject("timing");
+					JSONObject code = timing.getJSONObject("code");
+					dosage = (String) code.get("text");
+				}
+				BigDecimal days = medReq.getDosageInstructionFirstRep().getTiming().getRepeat().getDuration();
+				String doctorName = medReq.getRequester().getDisplay();
 
-			medReqDTO.setMedicationName(medicationName);
-			medReqDTO.setDays(days);
-			medReqDTO.setDoctorName(doctorName.split(" \\(")[0]);
-			medReqDTO.setDosage(dosage.split(":")[0]);
-			medications.add(medReqDTO);
+				System.out.println(medicationName + ", " + dosage + ", " + days + ", " + doctorName);
+
+				medReqDTO.setMedicationName(medicationName);
+				medReqDTO.setDays(days);
+				medReqDTO.setDoctorName(doctorName.split(" \\(")[0]);
+				medReqDTO.setDosage(dosage.split(":")[0]);
+				medications.add(medReqDTO);
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
 		}
 
 		Gson gson = new Gson();
@@ -277,13 +339,16 @@ public class HREBundleService {
 		ArrayList<HashMap> testList = new ArrayList<>();
 		while (iterator.hasNext()) {
 			BundleEntryComponent bundleEntry = iterator.next();
-			ServiceRequest serReq = (ServiceRequest) bundleEntry.getResource();
-
-			HashMap<String, Object> map = new HashMap<>();
-			map.put("testName", serReq.getCode().getText());
-			map.put("doctorName", serReq.getRequester().getDisplay().split(" \\(")[0]);
-			map.put("testGivenDate", serReq.getOccurrencePeriod().getStart());
-			testList.add(map);
+			try {
+				ServiceRequest serReq = (ServiceRequest) bundleEntry.getResource();
+				HashMap<String, Object> map = new HashMap<>();
+				map.put("testName", serReq.getCode().getText());
+				map.put("doctorName", serReq.getRequester().getDisplay().split(" \\(")[0]);
+				map.put("testGivenDate", serReq.getOccurrencePeriod().getStart());
+				testList.add(map);
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
 		}
 
 		Gson gson = new Gson();

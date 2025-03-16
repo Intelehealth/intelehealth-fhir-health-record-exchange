@@ -5,7 +5,7 @@ import java.util.*;
 public class ObservationDTO {
 
 	private String title;
-	private ArrayList<String> data = new ArrayList<>();
+	private Collection<ArrayList> data = new ArrayList<>();
 
 
 	public String getTitle() {
@@ -16,12 +16,12 @@ public class ObservationDTO {
 		this.title = title;
 	}
 
-	public ArrayList<String> getData() {
+	public Collection<ArrayList> getData() {
 		return data;
 	}
 
-	public void setData(ArrayList<String> data) {
-		this.data = data;
+	public void setData(Collection<ArrayList> collection) {
+		this.data = collection;
 	}
 
 	@Override
