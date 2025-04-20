@@ -133,32 +133,36 @@ public class HREBundleService {
 			Observation obs = (Observation) bundleEntry.getResource();
 			HashMap<String, Object> obsItem = new HashMap<>();
 			try {
-				if (obs.getCode().getText().toUpperCase().contains("COMPLAINT")
-						|| hasSnomedCode(obs.getCode(), "422843007")) {
+				if ((obs.getCode()!=null && obs.getCode().getText()!=null && obs.getCode().getText().toUpperCase().contains("COMPLAINT"))
+						|| hasSnomedCode(obs.getCode(), "422843007")
+						|| hasCodeDisplay(obs.getCode(), "COMPLAINT")) {
 					String encounter = obs.getEncounter().getReference();
 					ArrayList<String> listItem = complainMap.getOrDefault(encounter, new ArrayList<>());
 					listItem.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "CURRENT COMPLAINT"));
 					complainMap.put(encounter, listItem);
-				} else if (obs.getCode().getText().toUpperCase().contains("PHYSICAL EXAMINATION")
-						|| hasSnomedCode(obs.getCode(), "425044008")) {
+				} else if ((obs.getCode()!=null && obs.getCode().getText()!=null && obs.getCode().getText().toUpperCase().contains("PHYSICAL EXAMINATION"))
+						|| hasSnomedCode(obs.getCode(), "425044008")
+						|| hasCodeDisplay(obs.getCode(), "PHYSICAL EXAMINATION")) {
 					String encounter = obs.getEncounter().getReference();
 					ArrayList<String> listItem = physicalMap.getOrDefault(encounter, new ArrayList<>());
 					listItem.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "PHYSICAL EXAMINATION"));
 					physicalMap.put(encounter, listItem);
-				} else if (obs.getCode().getText().toUpperCase().contains("FAMILY HISTORY")
-						|| hasSnomedCode(obs.getCode(), "422432008")) {
+				} else if ((obs.getCode()!=null && obs.getCode().getText()!=null && obs.getCode().getText().toUpperCase().contains("FAMILY HISTORY"))
+						|| hasSnomedCode(obs.getCode(), "422432008")
+						|| hasCodeDisplay(obs.getCode(), "FAMILY HISTORY")) {
 					String encounter = obs.getEncounter().getReference();
 					ArrayList<String> listItem = familyHistoryMap.getOrDefault(encounter, new ArrayList<>());
 					listItem.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "FAMILY HISTORY"));
 					familyHistoryMap.put(encounter, listItem);
-				} else if (obs.getCode().getText().toUpperCase().contains("MEDICAL HISTORY")
-						|| hasSnomedCode(obs.getCode(), "371529009")) {
+				} else if ((obs.getCode()!=null && obs.getCode().getText()!=null && obs.getCode().getText().toUpperCase().contains("MEDICAL HISTORY"))
+						|| hasSnomedCode(obs.getCode(), "371529009")
+						|| hasCodeDisplay(obs.getCode(), "MEDICAL HISTORY")) {
 
 					String encounter = obs.getEncounter().getReference();
 					ArrayList<String> listItem = medicalHistoryMap.getOrDefault(encounter, new ArrayList<>());
 					listItem.addAll(parseHTML(obs.getValueStringType().getValueAsString(), "MEDICAL HISTORY"));
 					medicalHistoryMap.put(encounter, listItem);
-				} else if (obs.getCode().getText().contains("Referral")) {
+				} else if ((obs.getCode()!=null && obs.getCode().getText()!=null && obs.getCode().getText().contains("Referral"))) {
 //					referral.addAll(parseHTML(obs.getValueStringType().getValueAsString(),"Referral"));
 				} else if (obs.getCategory() != null && !obs.getCategory().isEmpty()
 						&& obs.getCategory().get(0).getCoding().get(0).getCode().equals("exam")) {
@@ -362,6 +366,18 @@ public class HREBundleService {
 
 		for (Coding coding : code.getCoding()) {
 			if (coding.getCode().equals(snomedCTCode))
+				return true;
+		}
+
+		return false;
+	}
+	
+	private boolean hasCodeDisplay(CodeableConcept code, String displayName) {
+		if (code == null)
+			return false;
+
+		for (Coding coding : code.getCoding()) {
+			if (coding.getCode().equals(displayName))
 				return true;
 		}
 
