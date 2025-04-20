@@ -377,7 +377,7 @@ public class HREBundleService {
 			return false;
 
 		for (Coding coding : code.getCoding()) {
-			if (coding.getCode().equals(displayName))
+			if (coding.getDisplay().equals(displayName))
 				return true;
 		}
 
