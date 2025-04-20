@@ -170,9 +170,17 @@ public class HREBundleService {
 					String encounter = obs.getEncounter().getReference();
 					ArrayList<String> vitalSample = vitalMap.getOrDefault(encounter, new ArrayList<>());
 					if (obs.getValueQuantity() != null) {
-						String vital = obs.getCode().getText() + " : " + obs.getValueQuantity().getValue();
-						vitalSample.add(vital);
-						vitalMap.put(encounter, vitalSample);
+						String vital="";
+						if(obs.getCode()!=null && obs.getCode().getText()!=null) {
+							 vital = obs.getCode().getText() + " : " + obs.getValueQuantity().getValue();
+						}else {
+							 vital = obs.getCode().getCoding().get(0).getDisplay() + " : " + obs.getValueQuantity().getValue();
+						}
+						
+						if(!vital.equals("")) {
+							vitalSample.add(vital);
+							vitalMap.put(encounter, vitalSample);
+						}
 					}
 				} else {
 					String encounter = obs.getEncounter().getReference();
