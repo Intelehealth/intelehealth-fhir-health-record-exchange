@@ -10,11 +10,14 @@ import org.hl7.fhir.common.hapi.validation.support.InMemoryTerminologyServerVali
 import org.hl7.fhir.common.hapi.validation.support.PrePopulatedValidationSupport;
 import org.hl7.fhir.common.hapi.validation.support.ValidationSupportChain;
 import org.hl7.fhir.common.hapi.validation.validator.FhirInstanceValidator;
+import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.Bundle.BundleEntryComponent;
 import org.hl7.fhir.r4.model.Encounter;
+import org.hl7.fhir.r4.model.Location;
 import org.hl7.fhir.r4.model.MedicationRequest;
 import org.hl7.fhir.r4.model.Observation;
+import org.hl7.fhir.r4.model.Practitioner;
 import org.hl7.fhir.r4.model.Resource;
 import org.hl7.fhir.r4.model.ServiceRequest;
 import org.ih.health.record.exchange.config.FhirConfig;
@@ -41,6 +44,8 @@ import org.springframework.stereotype.Component;
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.context.support.DefaultProfileValidationSupport;
 import ca.uhn.fhir.parser.DataFormatException;
+import ca.uhn.fhir.rest.gclient.IQuery;
+import ca.uhn.fhir.rest.param.DateRangeParam;
 import ca.uhn.fhir.validation.FhirValidator;
 import ca.uhn.fhir.validation.ValidationResult;
 
@@ -64,14 +69,18 @@ public class DataSendToFHIR extends IHConstant {
 	@Autowired
 	private DataExchangeAuditLogService dataExchangeService;
 
-	@Scheduled(fixedDelay = 60000, initialDelay = 60000)
+	@Scheduled(fixedDelay = 60000, initialDelay = 500)
 	public void scheduleTaskUsingCronExpression()
 			throws ParseException, UnsupportedEncodingException, DataFormatException {
 
 		ConfigDataSync healthRecordSync = configDataSyncService.getConfigDataSync(ConfigFacilityDataType.HEALTH_RECORD);
 
 		if (healthRecordSync.getStatus()) {
-
+			
+			exportResource(Location.class);
+			
+			exportResource(Practitioner.class);
+			
 			// Transferring all the medication list to central @Fhir server
 			transferMedication();
 
@@ -92,6 +101,41 @@ public class DataSendToFHIR extends IHConstant {
 			System.err.println("(HRE) Transfer completed ............");
 		} else {
 			System.err.println("Health Record Sending is disabled");
+		}
+	}
+	
+	private void exportResource(Class<? extends IBaseResource> resouce)
+			throws ParseException, UnsupportedEncodingException, DataFormatException {
+
+		IQuery<Bundle> searchQuery = firFhirConfig.getLocalOpenMRSFhirContext().search()
+				.forResource(resouce).returnBundle(Bundle.class);
+
+		Bundle originalTasksBundle = searchQuery.execute();
+
+		exportBundle(originalTasksBundle);
+		if (originalTasksBundle.hasEntry()) {
+			System.out.println("Got  bundle size : " + originalTasksBundle.getEntry().size());
+		}
+	}
+	
+	public void exportBundle(Bundle originalTasksBundle)
+			throws ParseException, UnsupportedEncodingException, DataFormatException {
+		if (originalTasksBundle.hasEntry()) {
+			Bundle transactionBundle = new Bundle();
+			transactionBundle.setType(Bundle.BundleType.TRANSACTION);
+			for (BundleEntryComponent bundleEntry : originalTasksBundle.getEntry()) {
+				Resource resource = (Resource) bundleEntry.getResource();
+				Bundle.BundleEntryComponent component = transactionBundle.addEntry();
+				component.setResource(resource);
+				component.getRequest().setUrl(resource.fhirType() + "/" + resource.getIdElement().getIdPart())
+						.setMethod(Bundle.HTTPVerb.PUT);
+			}
+			String payload = fhirContext.newJsonParser().setPrettyPrint(true).encodeResourceToString(transactionBundle);
+			System.err.println("DDD >>>>>>>> " + payload);
+			FhirResponse res = HttpWebClient.postWithBasicAuth(shrUrl, "rest/v1/bundle/save",
+					firFhirConfig.getOpenMRSCredentials()[0], firFhirConfig.getOpenMRSCredentials()[1], payload);
+			
+			System.out.println(res);
 		}
 	}
 
