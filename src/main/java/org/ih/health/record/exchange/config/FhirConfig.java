@@ -5,6 +5,7 @@ import org.ih.health.record.exchange.utils.IHConstant;
 import org.springframework.stereotype.Component;
 
 import ca.uhn.fhir.context.FhirContext;
+import ca.uhn.fhir.parser.LenientErrorHandler;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.rest.client.interceptor.BasicAuthInterceptor;
 
@@ -21,7 +22,8 @@ public class FhirConfig extends IHConstant{
 		
 	}
 	
-	public  IGenericClient getLocalOpenMRSFhirContext(){		
+	public  IGenericClient getLocalOpenMRSFhirContext(){
+		fhirContext = fhirContext.setParserErrorHandler(new LenientErrorHandler().setErrorOnInvalidValue(false));
 		IGenericClient openMRSServer = fhirContext.newRestfulGenericClient(localOpenmrsOpenhimURL+"/ws/fhir2/R4");
 		BasicAuthInterceptor openmrsAuthentication = new BasicAuthInterceptor(localOpenmrsOpenhimAuthentication);
 		openMRSServer.registerInterceptor(openmrsAuthentication);

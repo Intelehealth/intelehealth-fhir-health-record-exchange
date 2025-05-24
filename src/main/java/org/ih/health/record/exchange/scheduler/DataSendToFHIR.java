@@ -44,8 +44,7 @@ import org.springframework.stereotype.Component;
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.context.support.DefaultProfileValidationSupport;
 import ca.uhn.fhir.parser.DataFormatException;
-import ca.uhn.fhir.rest.gclient.IQuery;
-import ca.uhn.fhir.rest.param.DateRangeParam;
+import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.validation.FhirValidator;
 import ca.uhn.fhir.validation.ValidationResult;
 
@@ -76,11 +75,11 @@ public class DataSendToFHIR extends IHConstant {
 		ConfigDataSync healthRecordSync = configDataSyncService.getConfigDataSync(ConfigFacilityDataType.HEALTH_RECORD);
 
 		if (healthRecordSync.getStatus()) {
-			
+
 			exportResource(Location.class);
-			
+
 			exportResource(Practitioner.class);
-			
+
 			// Transferring all the medication list to central @Fhir server
 			transferMedication();
 
@@ -103,40 +102,73 @@ public class DataSendToFHIR extends IHConstant {
 			System.err.println("Health Record Sending is disabled");
 		}
 	}
-	
-	private void exportResource(Class<? extends IBaseResource> resouce)
+
+	private void exportResource(Class<? extends IBaseResource> resourceType)
 			throws ParseException, UnsupportedEncodingException, DataFormatException {
+		int pageSize = 50;
+		int offset = 0;
+		boolean continueFetching = true;
 
-		IQuery<Bundle> searchQuery = firFhirConfig.getLocalOpenMRSFhirContext().search()
-				.forResource(resouce).returnBundle(Bundle.class);
+		IGenericClient client = firFhirConfig.getLocalOpenMRSFhirContext();
 
-		Bundle originalTasksBundle = searchQuery.execute();
+		Bundle fullBundle = new Bundle();
 
-		exportBundle(originalTasksBundle);
-		if (originalTasksBundle.hasEntry()) {
-			System.out.println("Got  bundle size : " + originalTasksBundle.getEntry().size());
+		try {
+
+			while (continueFetching) {
+				String url = localOpenmrsOpenhimURL + "/ws/fhir2/R4" + "/" + resourceType.getSimpleName() + "?_count="
+						+ pageSize + "&_getpagesoffset=" + offset + "&_sort=_lastUpdated";
+
+				System.out.println("URL to fetch: >>>> " + url);
+
+				Bundle bundle = client.search().byUrl(url).returnBundle(Bundle.class).execute();
+
+				if (bundle.hasEntry()) {
+					fullBundle.getEntry().addAll(bundle.getEntry());
+				}
+
+				if (!bundle.hasEntry() || bundle.getEntry().size() < pageSize) {
+					continueFetching = false;
+				} else {
+					offset += pageSize;
+				}
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
 		}
+		
+		exportBundle(fullBundle);
+		System.out.println("Got full bundle size: " + fullBundle.getEntry().size());
 	}
-	
+
 	public void exportBundle(Bundle originalTasksBundle)
 			throws ParseException, UnsupportedEncodingException, DataFormatException {
+		int totalEntry = originalTasksBundle.getEntry().size();
+		int totalSend = 0;
 		if (originalTasksBundle.hasEntry()) {
-			Bundle transactionBundle = new Bundle();
-			transactionBundle.setType(Bundle.BundleType.TRANSACTION);
+
 			for (BundleEntryComponent bundleEntry : originalTasksBundle.getEntry()) {
+				Bundle transactionBundle = new Bundle();
+				transactionBundle.setType(Bundle.BundleType.TRANSACTION);
 				Resource resource = (Resource) bundleEntry.getResource();
 				Bundle.BundleEntryComponent component = transactionBundle.addEntry();
 				component.setResource(resource);
 				component.getRequest().setUrl(resource.fhirType() + "/" + resource.getIdElement().getIdPart())
 						.setMethod(Bundle.HTTPVerb.PUT);
+				String payload = fhirContext.newJsonParser().setPrettyPrint(true)
+						.encodeResourceToString(transactionBundle);
+//				System.err.println("DDD >>>>>>>> " + payload);
+				FhirResponse res = HttpWebClient.postWithBasicAuth(shrUrl, "rest/v1/bundle/save",
+						firFhirConfig.getOpenMRSCredentials()[0], firFhirConfig.getOpenMRSCredentials()[1], payload);
+
+				System.out.println(res);
+				if (res.getStatusCode().contains("200") || res.getStatusCode().contains("201")) {
+					totalSend++;
+				}
 			}
-			String payload = fhirContext.newJsonParser().setPrettyPrint(true).encodeResourceToString(transactionBundle);
-			System.err.println("DDD >>>>>>>> " + payload);
-			FhirResponse res = HttpWebClient.postWithBasicAuth(shrUrl, "rest/v1/bundle/save",
-					firFhirConfig.getOpenMRSCredentials()[0], firFhirConfig.getOpenMRSCredentials()[1], payload);
-			
-			System.out.println(res);
 		}
+
+		System.out.println("Total send : " + totalSend + " / " + totalEntry);
 	}
 
 	private void transferMedication() throws UnsupportedEncodingException, DataFormatException, ParseException {
@@ -431,33 +463,31 @@ public class DataSendToFHIR extends IHConstant {
 		Resource resource = bundle.getEntryFirstRep().getResource();
 		return resource.getIdElement().getIdPart();
 	}
-	
-	private void validateResource(Resource resource) {
-		
-        FhirValidator validator = fhirContext.newValidator();
-        
-        FhirInstanceValidator instanceValidator = new FhirInstanceValidator(fhirContext);
-        
-        ValidationSupportChain supportChain = new ValidationSupportChain(
-                new DefaultProfileValidationSupport(fhirContext),
-                new PrePopulatedValidationSupport(fhirContext),
-                new InMemoryTerminologyServerValidationSupport(fhirContext)
-        );
-        
-        instanceValidator.setValidationSupport(supportChain);
-        
-        validator.registerValidatorModule(instanceValidator);
 
-        ValidationResult result = validator.validateWithResult(resource);
-        
-        if (result.isSuccessful()) {
-            System.out.println("Validation passed!");
-        } else {
-            System.err.println("Validation failed:");
-            result.getMessages().forEach(msg -> {
-                System.err.println(" - " + msg.getSeverity() + ": " + msg.getMessage());
-            });
-        }
+	private void validateResource(Resource resource) {
+
+		FhirValidator validator = fhirContext.newValidator();
+
+		FhirInstanceValidator instanceValidator = new FhirInstanceValidator(fhirContext);
+
+		ValidationSupportChain supportChain = new ValidationSupportChain(
+				new DefaultProfileValidationSupport(fhirContext), new PrePopulatedValidationSupport(fhirContext),
+				new InMemoryTerminologyServerValidationSupport(fhirContext));
+
+		instanceValidator.setValidationSupport(supportChain);
+
+		validator.registerValidatorModule(instanceValidator);
+
+		ValidationResult result = validator.validateWithResult(resource);
+
+		if (result.isSuccessful()) {
+			System.out.println("Validation passed!");
+		} else {
+			System.err.println("Validation failed:");
+			result.getMessages().forEach(msg -> {
+				System.err.println(" - " + msg.getSeverity() + ": " + msg.getMessage());
+			});
+		}
 	}
 
 }
