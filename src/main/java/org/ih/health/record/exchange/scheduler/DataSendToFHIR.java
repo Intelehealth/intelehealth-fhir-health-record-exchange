@@ -3,9 +3,11 @@ package org.ih.health.record.exchange.scheduler;
 import java.io.UnsupportedEncodingException;
 import java.text.ParseException;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 
+import org.apache.logging.log4j.Marker;
 import org.hl7.fhir.common.hapi.validation.support.InMemoryTerminologyServerValidationSupport;
 import org.hl7.fhir.common.hapi.validation.support.PrePopulatedValidationSupport;
 import org.hl7.fhir.common.hapi.validation.support.ValidationSupportChain;
@@ -80,7 +82,7 @@ public class DataSendToFHIR extends IHConstant {
 
 			exportResource(Practitioner.class);
 
-			// Transferring all the medication list to central @Fhir server
+//			 Transferring all the medication list to central @Fhir server
 			transferMedication();
 
 			// Transferring all the visit completed encounter where patient is already
@@ -105,6 +107,7 @@ public class DataSendToFHIR extends IHConstant {
 
 	private void exportResource(Class<? extends IBaseResource> resourceType)
 			throws ParseException, UnsupportedEncodingException, DataFormatException {
+		IHMarker marker = ihMarkerService.findByName(resourceType.getSimpleName().toUpperCase() + "_EXPORT");
 		int pageSize = 50;
 		int offset = 0;
 		boolean continueFetching = true;
@@ -114,7 +117,7 @@ public class DataSendToFHIR extends IHConstant {
 		Bundle fullBundle = new Bundle();
 
 		try {
-
+			// System.out.println("Marker: "+marker);
 			while (continueFetching) {
 				String url = localOpenmrsOpenhimURL + "/ws/fhir2/R4" + "/" + resourceType.getSimpleName() + "?_count="
 						+ pageSize + "&_getpagesoffset=" + offset + "&_sort=_lastUpdated";
@@ -124,6 +127,7 @@ public class DataSendToFHIR extends IHConstant {
 				Bundle bundle = client.search().byUrl(url).returnBundle(Bundle.class).execute();
 
 				if (bundle.hasEntry()) {
+					System.out.println("Found: " + bundle.getEntry().size());
 					fullBundle.getEntry().addAll(bundle.getEntry());
 				}
 
@@ -136,38 +140,40 @@ public class DataSendToFHIR extends IHConstant {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
-		
-		exportBundle(fullBundle);
+
+		exportBundle(fullBundle, marker);
 		System.out.println("Got full bundle size: " + fullBundle.getEntry().size());
+		ihMarkerService.updateMarkerByName(resourceType.getSimpleName().toUpperCase() + "_EXPORT");
 	}
 
-	public void exportBundle(Bundle originalTasksBundle)
+	public void exportBundle(Bundle originalTasksBundle, IHMarker marker)
 			throws ParseException, UnsupportedEncodingException, DataFormatException {
+		Date lastUpdated = DateUtils.strToDate("yyyy-MM-dd HH:mm:ss", marker.getLastSyncTime());
 		int totalEntry = originalTasksBundle.getEntry().size();
 		int totalSend = 0;
 		if (originalTasksBundle.hasEntry()) {
-
 			for (BundleEntryComponent bundleEntry : originalTasksBundle.getEntry()) {
 				Bundle transactionBundle = new Bundle();
 				transactionBundle.setType(Bundle.BundleType.TRANSACTION);
 				Resource resource = (Resource) bundleEntry.getResource();
-				Bundle.BundleEntryComponent component = transactionBundle.addEntry();
-				component.setResource(resource);
-				component.getRequest().setUrl(resource.fhirType() + "/" + resource.getIdElement().getIdPart())
-						.setMethod(Bundle.HTTPVerb.PUT);
-				String payload = fhirContext.newJsonParser().setPrettyPrint(true)
-						.encodeResourceToString(transactionBundle);
-//				System.err.println("DDD >>>>>>>> " + payload);
-				FhirResponse res = HttpWebClient.postWithBasicAuth(shrUrl, "rest/v1/bundle/save",
-						firFhirConfig.getOpenMRSCredentials()[0], firFhirConfig.getOpenMRSCredentials()[1], payload);
+				if (resource.getMeta() != null && resource.getMeta().getLastUpdated().after(lastUpdated)) {
+					Bundle.BundleEntryComponent component = transactionBundle.addEntry();
+					component.setResource(resource);
+					component.getRequest().setUrl(resource.fhirType() + "/" + resource.getIdElement().getIdPart())
+							.setMethod(Bundle.HTTPVerb.PUT);
+					String payload = fhirContext.newJsonParser().setPrettyPrint(true)
+							.encodeResourceToString(transactionBundle);
+					FhirResponse res = HttpWebClient.postWithBasicAuth(shrUrl, "rest/v1/bundle/save",
+							firFhirConfig.getOpenMRSCredentials()[0], firFhirConfig.getOpenMRSCredentials()[1],
+							payload);
 
-				System.out.println(res);
-				if (res.getStatusCode().contains("200") || res.getStatusCode().contains("201")) {
-					totalSend++;
+					System.out.println(res);
+					if (res.getStatusCode().contains("200") || res.getStatusCode().contains("201")) {
+						totalSend++;
+					}
 				}
 			}
 		}
-
 		System.out.println("Total send : " + totalSend + " / " + totalEntry);
 	}
 
