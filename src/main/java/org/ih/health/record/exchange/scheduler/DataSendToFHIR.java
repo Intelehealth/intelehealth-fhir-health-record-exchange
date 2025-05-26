@@ -440,23 +440,29 @@ public class DataSendToFHIR extends IHConstant {
 				log.setRequest(payload);
 				log.setRequestUrl(shrUrl + "rest/v1/bundle/save");
 
-				DataExchangeAuditLog uLog = dataExchangeService.save(log);
+				try {
+					DataExchangeAuditLog uLog = dataExchangeService.save(log);
 
-				FhirResponse res = HttpWebClient.postWithBasicAuth(shrUrl, "rest/v1/bundle/save",
-						firFhirConfig.getOpenMRSCredentials()[0], firFhirConfig.getOpenMRSCredentials()[1], payload);
+					FhirResponse res = HttpWebClient.postWithBasicAuth(shrUrl, "rest/v1/bundle/save",
+							firFhirConfig.getOpenMRSCredentials()[0], firFhirConfig.getOpenMRSCredentials()[1],
+							payload);
 
-				uLog.setResponse(res.getResponse());
-				uLog.setResponseStatus(res.getStatusCode());
-				if (res.getStatusCode().equals("200")) {
-					Bundle remoteBundle = fhirContext.newJsonParser().parseResource(Bundle.class, res.getResponse());
-					System.err.println("Response from central fhir: " + res.getResponse());
-					uLog.setFhirId(extractResourceId(remoteBundle));
-				} else {
-					uLog.setStatus(false);
+					uLog.setResponse(res.getResponse());
+					uLog.setResponseStatus(res.getStatusCode());
+					if (res.getStatusCode().equals("200")) {
+						Bundle remoteBundle = fhirContext.newJsonParser().parseResource(Bundle.class,
+								res.getResponse());
+						System.err.println("Response from central fhir: " + res.getResponse());
+						uLog.setFhirId(extractResourceId(remoteBundle));
+					} else {
+						uLog.setStatus(false);
+					}
+					uLog.setChangedBy(1); // Admin-OpenMRS
+					uLog.setDateChanged(DateUtils.toFormattedDateNow());
+					dataExchangeService.update(uLog);
+				} catch (Exception e) {
+					e.printStackTrace();
 				}
-				uLog.setChangedBy(1); // Admin-OpenMRS
-				uLog.setDateChanged(DateUtils.toFormattedDateNow());
-				dataExchangeService.update(uLog);
 			}
 
 		}
