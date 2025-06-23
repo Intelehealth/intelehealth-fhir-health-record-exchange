@@ -111,9 +111,22 @@ public class DataSendToFHIR extends IHConstant {
 		int pageSize = 50;
 		int offset = 0;
 		boolean continueFetching = true;
-
+		System.out.println("Resource last updated at : "+marker);
 		IGenericClient client = firFhirConfig.getLocalOpenMRSFhirContext();
 
+		Date lastUpdated = DateUtils.strToDate("yyyy-MM-dd HH:mm:ss", marker.getLastSyncTime());
+	    Date currentTime = new Date();
+
+	    // Time difference check (in milliseconds)
+	    long diffMillis = currentTime.getTime() - lastUpdated.getTime();
+	    long diffMinutes = diffMillis / (60 * 1000);
+
+	    // If last sync was less than 30 minutes ago, skip export
+	    if (diffMinutes < 60) {
+	        System.err.println("Export skipped: Last sync was only " + diffMinutes + " minutes ago.");
+	        return;
+	    }
+		
 		Bundle fullBundle = new Bundle();
 
 		try {
